@@ -1,0 +1,651 @@
+create table employees(
+	employee_id INT,
+	first_name VARCHAR (50),
+	last_name VARCHAR (50),
+	department_id INT,
+	location VARCHAR(50),
+	hire_date DATE,
+	gender VARCHAR (20)
+)
+
+alter table employees add employee_name varchar(50)
+update employees set employee_name = concat(first_name,' ',last_name)
+
+copy employees from 'C:\Program Files\PostgreSQL\17\TechWave_Solutions_employees_1.csv' delimiter ',' csv header
+
+create table departments(
+	department_id INT,
+	department_name VARCHAR (20),
+	manager_id INT
+)
+copy departments from 'C:\Program Files\PostgreSQL\17\TechWave_Solutions_departments_1.csv' delimiter ',' csv header
+
+create table salaries(
+	employee_id INT,
+	salary INT,
+	bonus INT,
+	pay_date DATE
+)
+copy salaries from 'C:\Program Files\PostgreSQL\17\TechWave_Solutions_salaries_1.csv' delimiter ',' csv header
+
+--1 Assign a unique row number to each employee in the employees dataset.
+select
+	employee_id,
+	first_name,
+	last_name,
+	department_id,
+	location,
+	hire_date,
+	gender,
+	row_number () over (order by employee_id)
+from employees
+
+--2 Rank employees by their salaries within each department
+select 
+	employee_name, 
+	salary, 
+	department_name,
+	rank () over (partition by d.department_id order by s.salary desc)
+from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+
+--3 Find the dense rank of employees by salary within their location.
+select 
+	employee_name, 
+	salary, 
+	location,
+	dense_rank () over (partition by e.location order by s.salary desc)
+from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+	
+--Calculate the cumulative salary for each department, ordered by employee ID.
+select
+	department_name,
+	e.employee_id,
+	salary,
+	sum(s.salary) over (partition by d.department_id order by e.employee_id) as cummulative_salary
+	from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+	order by d.department_name, e.employee_id
+
+with employee_avg_salary as (
+  select 
+    e.employee_id, 
+    d.department_name, 
+    round(avg(s.salary), 2) as avg_salary
+  from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+  join departments as d on d.department_id = e.department_id
+  group by e.employee_id, d.department_name
+)
+select
+  department_name, 
+  employee_id, 
+  avg_salary,
+  sum(avg_salary) over (partition by department_name order by employee_id) as cumulative_salary
+from employee_avg_salary
+order by department_name, employee_id;
+
+--5 Identify the top 3 highest-paid employees in each department using RANK().
+with ranked_employees as (
+	select 
+		e.employee_name,
+		d.department_name,
+		s.salary,
+		rank() over(partition by d.department_name order by s.salary desc) as rank
+	from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+)
+select *
+from ranked_employees
+where rank <= 3;
+
+--6 Identify the top 3 highest-paid employees in each department using DENSE_RANK().
+with ranked_employees as (
+	select 
+		e.employee_name,
+		d.department_name,
+		s.salary,
+		dense_rank() over(partition by d.department_name order by s.salary desc) as rank
+	from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+)
+select *
+from ranked_employees
+where rank <= 3;
+
+--7 Calculate a rolling total of bonuses for each department.
+with
+ cte_salary as(
+ 	select d.department_id,
+	 d.department_name,
+	 s.bonus,
+	 sum(s.bonus) over(partition by d.department_id order by e.employee_id) as rolling_bonus
+ from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id)
+select * 
+	from cte_salary
+
+-- 8 Find the cumulative salary of employees in the Engineering department.
+with
+ cte_salary as(
+ 	select
+	 d.department_name,
+	 e.employee_name,
+	 s.salary,
+	 sum(s.salary) over(partition by d.department_id order by e.employee_id) as cumulative_salary
+ from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id)
+select * 
+	from cte_salary
+	where department_name = 'Engineering'
+
+--9 Show the row number of employees ordered by hire date within each department.
+select
+	employee_name,
+	department_name,
+	hire_date,
+	row_number () over (partition by department_name order by e.hire_date asc) as row_number
+from employees as e
+	join departments as d on d.department_id = e.department_id
+
+--10 Rank all employees globally (without partition) based on their salaries.
+select
+	rank() over(order by salary desc),
+	employee_name,
+	salary
+from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+
+--11 Use a CTE to calculate the average salary per department
+with 
+	cte_salary as(
+select 
+	d.department_id,
+	d.department_name,
+	round(avg(s.salary),2) as avg_salary
+from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+	group by d.department_id,d.department_name
+	)
+select department_name,
+avg_salary 
+	from cte_salary
+	order by avg_salary desc
+
+--12 Chain CTEs to first find employees with salaries above the average and then filter by department.
+with 
+	cte_salary as(
+select
+	e.employee_id,
+	e.employee_name,
+	d.department_id,
+	d.department_name,
+	s.salary
+from employees as e
+	join salaries as s on e.employee_id = s.employee_id
+	join departments as d on d.department_id = e.department_id
+	)
+select
+	employee_name,
+	department_name,
+	salary 
+	from cte_salary
+	where salary > (select avg(salary) from salaries)
+	order by department_name, salary desc
+
+--13 Use a CTE to find the youngest employee in each department
+with cte_hire_dates as (
+  select 
+    e.employee_id,
+    e.employee_name,
+    d.department_id,
+    d.department_name,
+    e.hire_date,
+    rank() over(partition by d.department_id order by e.hire_date desc) as hire_rank
+  from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+  join departments as d on d.department_id = e.department_id
+)
+select 
+  employee_name,
+  department_name,
+  hire_date
+from cte_hire_dates
+where hire_rank = 1;
+
+--14 Chain multiple CTEs to filter employees with bonuses above average, then calculate their total compensation.
+with cte_employees as (
+  select 
+    e.employee_id,
+    e.employee_name,
+    s.salary,
+    s.bonus
+  from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+),
+cte_above_avg_bonus as (
+  select *
+  from cte_employees
+  where bonus > (select avg(bonus) from salaries)
+),
+cte_total_compensation as (
+  select 
+    employee_id,
+    employee_name,
+    bonus,
+    salary,
+    (salary + bonus) as total_compensation
+  from cte_above_avg_bonus
+)
+select *
+from cte_total_compensation
+order by bonus desc;
+
+--15 Use a CTE to show the total salary expense for departments where total salaries exceed $1,000,000.
+with 
+	cte_total_salary as(
+select d.department_id,
+	d.department_name,
+	sum(s.salary) as total_salary
+from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+  join departments as d on d.department_id = e.department_id
+  group by d.department_name, d.department_id
+)
+	select department_name,
+	total_salary
+from cte_total_salary
+	where total_salary> 1000000
+	order by total_salary desc
+
+-- 16 Use a CTE to calculate the number of employees in each department and filter those with more than 50 employees
+with 
+	cte_total_employee as(
+select d.department_id,
+	d.department_name,
+	count(e.employee_id) as total_employee
+from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+  join departments as d on d.department_id = e.department_id
+  group by d.department_id, d.department_name)
+  select department_name,
+  	total_employee
+	from cte_total_employee
+	where total_employee > 50
+	
+-- 17 Combine employees and departments using a CTE and list all employees with their department names.
+with 
+cte_combine as(
+	select *
+from employees as e
+   join departments as d on d.department_id = e.department_id
+)
+	select employee_name,
+	department_name
+from cte_combine
+	order by department_name
+
+--18 Use a CTE to find employees who have been with the company for more than 5 years.
+with 
+	cte_years as (
+select employee_id,
+	employee_name,
+	hire_date 
+	from employees
+	)
+select employee_name,
+	hire_date 
+from cte_years
+	where hire_date < current_date - interval '5 years'
+	order by hire_date desc
+
+--19 Use a CTE to filter out employees with salaries below $60,000 and rank them by bonus.
+with
+	cte_salary as(
+select
+	e.employee_name,
+	round(avg(s.salary), 2) as salarry,
+	s.bonus,
+	rank() over(order by s.bonus)
+from employees as e
+  join salaries as s on e.employee_id = s.employee_id
+	group by e.employee_id, e.employee_name, s.bonus)
+select employee_name,
+	salarry,
+	bonus
+	from cte_salary
+	where salarry < 60000
+
+--20 Calculate the average hire year of employees by department.
+with cte_avg_hire_year as (
+    select 
+        e.department_id,
+        d.department_name,
+        avg(extract(year from AGE(current_date, e.hire_date))) as avg_hire_year
+    from employees as e
+   join departments as d on e.department_id = d.department_id
+    group by e.department_id, d.department_name
+)
+select 
+    department_name,
+    ROUND(avg_hire_year, 2) as avg_hire_year
+from cte_avg_hire_year;
+
+--21 Create a temporary table of employees in the Sales department and calculate their average bonus. 
+--21i create temp table sales_employees as
+	select e.employee_id,
+    e.employee_name,
+    e.department_id,
+    s.bonus
+from employees as e
+join departments as d on e.department_id = d.department_id
+join salaries as s on e.employee_id = s.employee_id
+where 
+    d.department_name = 'Sales'
+--21i
+select
+	employee_name,
+    round(avg(bonus), 2) as average_bonus
+from 
+    sales_employees
+	group by employee_name
+
+--22i Store the top 5 highest-paid employees in the company in a temporary table.
+create temp table top_paid as
+select e.employee_name,
+	s.salary
+from employees as e
+join salaries as s on e.employee_id = s.employee_id
+-- ii
+select employee_name,
+round(avg(salary), 2) 
+	from top_paid
+group by employee_name, salary
+order by salary desc
+limit 5
+
+--23i. Create a temporary table to show total salary expenses by location
+create temp table total_salary as
+select e.location,
+	sum(s.salary) as total_salary
+from employees as e
+join salaries as s on e.employee_id = s.employee_id
+group by location
+order by total_salary desc
+--ii.
+select * from total_salary
+
+--24i Create a temporary table to store employees hired in the last 3 years and calculate their average salary
+create temp table employees_hired as 
+select e.employee_id,
+	e.employee_name,
+	e.hire_date,
+	round(avg(s.salary), 2) as avg_salary
+from employees as e
+join salaries as s on e.employee_id = s.employee_id
+where e.hire_date >= current_date - interval '3 years'
+group by e.employee_id, e.employee_name, e.hire_date
+order by avg_salary desc
+--ii.
+select employee_name,
+	hire_date,
+	round(avg_salary,2) as avg_salary 
+	from employees_hired
+
+--25i Use a temporary table to filter out all employees with missing department assignments.
+create temp table missing_departmnt as
+select e.employee_name,
+	e.department_id,
+	d.department_name
+from employees as e 
+left join departments as d on e.department_id = d.department_id
+where e.department_id is null
+--ii.
+select * from missing_departmnt
+
+--26 Store the cumulative bonus per department in a temporary table.
+create temp table temp_bonus as
+select e.employee_id,
+	d.department_id,
+	d.department_name, bonus,
+		sum(s.bonus) over(partition by d.department_id order by s.bonus) as cumulative_bonus
+from employees as e 
+join salaries as s on e.employee_id = s.employee_id
+join departments	as d on d.department_id = e.department_id
+
+--27i a temporary table with the combined employee and salary data and calculate total compensation for each employee.
+create temp table employe_salary as
+select e.employee_id,
+		e.employee_name,
+		sum(s.bonus+s.salary) as total_compensation
+from employees as e
+inner join salaries as s on e.employee_id = s.employee_id
+group by e.employee_id, e.employee_name
+--ii.
+select *
+from employe_salary
+order by total_compensation desc
+
+--28i Store the top 10 employees with the highest cumulative salary and bonus in a temporary table.
+create temp table top_earners as
+select 
+    e.employee_id,
+    e.employee_name,
+    sum(s.salary + coalesce(s.bonus, 0)) as total_compensation
+from employees e
+join salaries s on e.employee_id = s.employee_id
+group by e.employee_id, e.employee_name
+order by total_compensation desc
+limit 10;
+--ii
+select * from top_earners
+
+--29 Use a temporary table to find employees who have worked in multiple departments (hypothetical scenario)
+create temp table multi_dept_employees as
+select 
+    employee_id,
+    employee_name
+from employees
+group by employee_id, employee_name
+having count(distinct department_id) > 1;
+--ii
+select * from multi_dept_employees
+
+--30i Temporary table with department names and their average salaries, and filter for departments with an average salary above $90,000
+create temp table dept_avg_sal as
+select d.department_id,
+		d.department_name,
+		avg(s.salary) as avg_sal
+	from employees as e
+join departments as d on d.department_id = e.department_id
+join salaries as s on s.employee_id = e.employee_id
+group by d.department_id,
+		d.department_name
+--ii
+select department_name,
+	round(avg_sal, 2) 
+	from dept_avg_sal
+	where avg_sal > 90000
+
+--31 Joining the employees and departments tables to find the manager for each employee.
+select e.employee_name,
+	d.manager_id
+from employees as e
+	join departments as d on e.department_id = d.department_id
+
+--32 LEFT JOIN to show all employees and their department names, even if their department ID is missing.
+select e.employee_name,
+	d.department_name
+from employees as e
+	left join departments as d on e.department_id = d.department_id
+
+--33 RIGHT JOIN to list all departments and their employees, even if no employees are assigned.
+select 
+        e.employee_name,
+    d.department_name
+from employees e
+right join departments d
+on e.department_id = d.department_id
+
+--34 employees who work in a department not listed in the departments table using a FULL OUTER JOIN.
+select 
+        e.employee_name,
+    e.department_id
+from employees e
+full outer join departments d
+on e.department_id = d.department_id
+where d.department_id is null;
+
+--35 UNION to combine employees hired in 2022 and those in 2023.
+select 
+        employee_name,
+    hire_date
+from employees
+where extract(year from hire_date) = 2022
+union
+select 
+    employee_name,
+    hire_date
+from employees
+where extract(year from hire_date) = 2023
+order by hire_date desc
+	
+--36 UNION ALL to show all entries, including duplicates, for employees with salaries above $80,000.
+select 
+    employee_id,
+    employee_name,
+    salary
+from employees
+join salaries using (employee_id)
+where salary > 80000
+	union all
+select 
+    employee_id,
+    employee_name,
+    salary
+from employees
+join salaries using (employee_id)
+where salary > 80000;
+
+--37 length of the last names of all employees.
+select employee_name,
+ LENGTH(employee_name) as name_length
+ 	from employees 
+
+--38 Convert all department names to uppercase.
+select 
+    department_id,
+    upper(department_name) as department_name_upper
+from departments
+
+--39 Trim leading and trailing spaces from employee first names
+select 
+    employee_id,
+    trim(first_name) as cleaned_first_name
+from employees
+
+--40 Extract the first 3 characters of employee last names.
+select 
+    employee_id,
+    left(last_name, 3) as first_three_letters
+from employees
+
+--41 Replace occurrences of "New York" with "NY" in the location field.
+select 
+    employee_id,
+    replace(location, 'New York', 'NY') as updated_location
+from employees
+
+--42 Label employees who work in "New York" as "East Coast" and others as "Other Region
+select 
+	employee_name,
+case when location = 'New York' then 'East Coast'
+else 'Other Region' 
+end as region
+	from employees
+	
+-- 43 new column categorizing salaries: "Low" (<$60,000), "Medium" ($60,000-$100,000), "High" (>$100,000)
+select 
+		salary,
+	case when salary <60000 then 'Low'
+when salary <=100000 then 'Medium'
+else 'High'
+	end as salary_category
+from salaries
+
+--44 Use CASE to calculate a "Total Compensation" column that includes bonuses only for employees in Sales
+select 
+    e.employee_name,
+	d.department_name,
+	s.salary,
+    case 
+        when d.department_name = 'Sales' then s.salary + s.bonus
+        else s.salary
+    end as total_compensation
+from employees e
+join departments d on e.department_id = d.department_id
+join salaries as s on s.employee_id = e.employee_id
+
+--45 Assign a bonus multiplier based on department: 1.5x for Finance, 1.2x for HR, and 1x for others
+select 
+    e.employee_name,
+	d.department_name,
+	s.bonus,
+    case 
+        when d.department_name = 'Finance' then 1.5 * s.bonus
+		when d.department_name = 'HR' then 1.2 * s.bonus
+        else s.bonus
+    end as bonus_multiplier
+from employees e
+join departments d on e.department_id = d.department_id
+join salaries as s on s.employee_id = e.employee_id
+
+--46 Employees who earn more than the average salary of their department.
+select e.employee_name,  
+       s.salary 
+from employees e
+join salaries s 
+    on e.employee_id = s.employee_id
+where s.salary > (
+        select avg(s2.salary)
+        from employees e2
+        join salaries s2 
+            on e2.employee_id = s2.employee_id
+        where e2.department_id = e.department_id
+    )
+
+--47 List departments with more employees than the average number of employees across all departments.
+select 
+	d.department_id, d.department_name, 
+	count(e.employee_id) as employee_count
+from departments d
+join employees e 
+    on d.department_id = e.department_id
+group by d.department_id, d.department_name
+having count(e.employee_id) > (
+    select avg(dept_count)
+    from (
+        select count(employee_id) as dept_count
+        from employees
+        group by department_id
+    ) sub
+)
+
+END
+
+select * from salaries order by employee_id
+
+drop table if exists employe_salary
+
+
+	
